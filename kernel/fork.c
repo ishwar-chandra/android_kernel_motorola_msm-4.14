@@ -2221,6 +2221,8 @@ struct task_struct *fork_idle(int cpu)
  *
  * It copies the process, and if successful kick-starts
  * it and waits for it to finish using the VM if required.
+ *
+ * args->exit_signal is expected to be checked for sanity by the caller.
  */
 long _do_fork(struct kernel_clone_args *args)
 {
@@ -2434,6 +2436,14 @@ noinline static int copy_clone_args_from_user(struct kernel_clone_args *kargs,
 	err = copy_struct_from_user(&args, sizeof(args), uargs, usize);
 	if (err)
 		return err;
+
+	/*
+	 * Verify that higher 32bits of exit_signal are unset and that
+	 * it is a valid signal
+	 */
+	if (unlikely((args.exit_signal & ~((u64)CSIGNAL)) ||
+		     !valid_signal(args.exit_signal)))
+		return -EINVAL;
 
 	*kargs = (struct kernel_clone_args){
 		.flags		= args.flags,
