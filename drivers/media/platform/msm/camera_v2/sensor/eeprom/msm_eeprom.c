@@ -444,6 +444,27 @@ clean_up:
 }
 
 /*
+ * Retry a transient CCI failure while reading the EEPROM memory map.
+ * eeprom_parse_memory_map() frees and clears the map on every failure,
+ * so a retry starts from a clean state.
+ */
+static int eeprom_parse_memory_map_retry(struct msm_eeprom_ctrl_t *e_ctrl,
+		struct msm_eeprom_memory_map_array *map)
+{
+	int rc, retry;
+
+	for (retry = 0; retry < 3; retry++) {
+		rc = eeprom_parse_memory_map(e_ctrl, map);
+		if (!rc)
+			return 0;
+		if (rc != -EIO && rc != -ENXIO && rc != -EINVAL)
+			break;
+		usleep_range(10000, 10100);
+	}
+	return rc;
+}
+
+/*
  * msm_eeprom_power_up - Do eeprom power up here
  * @e_ctrl:	ctrl structure
  * @power_info: power up info for eeprom
@@ -578,7 +599,7 @@ static int eeprom_init_config(struct msm_eeprom_ctrl_t *e_ctrl,
 		goto free_mem;
 	}
 
-	rc = eeprom_parse_memory_map(e_ctrl, memory_map_arr);
+	rc = eeprom_parse_memory_map_retry(e_ctrl, memory_map_arr);
 	if (rc < 0) {
 		pr_err("%s::%d memory map parse failed\n", __func__, __LINE__);
 		goto free_mem;
@@ -1587,7 +1608,7 @@ static int eeprom_init_config32(struct msm_eeprom_ctrl_t *e_ctrl,
 		goto free_mem;
 	}
 
-	rc = eeprom_parse_memory_map(e_ctrl, mem_map_array);
+	rc = eeprom_parse_memory_map_retry(e_ctrl, mem_map_array);
 	if (rc < 0) {
 		pr_err("%s:%d memory map parse failed\n",
 			__func__, __LINE__);
