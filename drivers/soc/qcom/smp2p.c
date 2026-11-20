@@ -677,14 +677,9 @@ static int qcom_smp2p_probe(struct platform_device *pdev)
 		goto unwind_interfaces;
 	}
 
-	/*
-	 * enable_irq_wake() below arms this IRQ as a wake source.
-	 * IRQF_NO_SUSPEND as well makes the IRQ core log
-	 * "misconfigured IRQ" and breaks wakeup accounting.
-	 */
 	ret = devm_request_threaded_irq(&pdev->dev, smp2p->irq,
 					qcom_smp2p_isr, qcom_smp2p_intr,
-					IRQF_ONESHOT,
+					IRQF_NO_SUSPEND | IRQF_ONESHOT,
 					"smp2p", (void *)smp2p);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to request interrupt\n");
