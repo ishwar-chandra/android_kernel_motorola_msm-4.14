@@ -2047,12 +2047,7 @@ struct qcom_glink *qcom_glink_native_probe(struct device *dev,
 	if (vm_support)
 		irqflags = IRQF_TRIGGER_RISING;
 	else
-		/*
-		 * enable_irq_wake() below arms this IRQ as a wake source.
-		 * IRQF_NO_SUSPEND as well makes the IRQ core log
-		 * "misconfigured IRQ" and breaks wakeup accounting.
-		 */
-		irqflags = IRQF_SHARED;
+		irqflags = IRQF_NO_SUSPEND | IRQF_SHARED;
 
 	ret = devm_request_irq(dev, irq,
 			       qcom_glink_native_intr,
