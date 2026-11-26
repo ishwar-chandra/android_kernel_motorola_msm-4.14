@@ -1630,6 +1630,7 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 		if (map) {
 			struct vm_area_struct *vma;
 			uintptr_t offset;
+			size_t map_len;
 			uint64_t num = buf_num_pages(buf, len);
 			int idx = list[i].pgidx;
 
@@ -1652,6 +1653,14 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 			pages[idx].addr = map->phys + offset;
 			pages[idx].size = num << PAGE_SHIFT;
 			/*
+			 * map->size is the page-rounded user length when the
+			 * session has no SMMU context bank (cb 0); the dma-buf
+			 * itself is the real limit there, so use the larger.
+			 */
+			map_len = map->size;
+			if (map->buf && map->buf->size > map_len)
+				map_len = map->buf->size;
+			/*
 			 * Check for page range overflow and validate page
 			 * range is not greater than map buffer range.
 			 * This prevents potential buffer overflow
@@ -1659,11 +1668,11 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 			 */
 			if (pages[idx].addr > (ULLONG_MAX - pages[idx].size) ||
 			    (pages[idx].addr + pages[idx].size) >
-					(map->phys + map->size)) {
+					(map->phys + map_len)) {
 				err = -EFAULT;
 				pr_err("adsprpc: %s: invalid buffer addr 0x%llx len 0x%zx IPA 0x%llx size 0x%zx fd %d\n",
 					__func__, buf, len, map->phys,
-					map->size, map->fd);
+					map_len, map->fd);
 				goto bail;
 			}
 		}
