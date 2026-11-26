@@ -1163,7 +1163,7 @@ static int context_build_overlap(struct smq_invoke_ctx *ctx)
 	int inbufs = REMOTE_SCALARS_INBUFS(ctx->sc);
 	int outbufs = REMOTE_SCALARS_OUTBUFS(ctx->sc);
 	int nbufs = inbufs + outbufs;
-	struct overlap max;
+	uintptr_t ion_buf_end = 0, non_ion_buf_end = 0;
 
 	for (i = 0; i < nbufs; ++i) {
 		ctx->overs[i].start = (uintptr_t)lpra[i].buf.pv;
@@ -1177,16 +1177,23 @@ static int context_build_overlap(struct smq_invoke_ctx *ctx)
 		ctx->overps[i] = &ctx->overs[i];
 	}
 	sort(ctx->overps, nbufs, sizeof(*ctx->overps), overlap_ptr_cmp, NULL);
-	max.start = 0;
-	max.end = 0;
 	for (i = 0; i < nbufs; ++i) {
-		if (ctx->overps[i]->start < max.end) {
-			ctx->overps[i]->mstart = max.end;
+		/*
+		 * ION buffers (those get_args() maps from an fd) are not
+		 * copied, so they must not shift the copy offsets of non-ION
+		 * buffers they overlap. Track the end of each type apart.
+		 */
+		int raix = ctx->overps[i]->raix;
+		uintptr_t *last_end = (ctx->fds && ctx->fds[raix] != -1) ?
+				&ion_buf_end : &non_ion_buf_end;
+
+		if (ctx->overps[i]->start < *last_end) {
+			ctx->overps[i]->mstart = *last_end;
 			ctx->overps[i]->mend = ctx->overps[i]->end;
-			ctx->overps[i]->offset = max.end -
+			ctx->overps[i]->offset = *last_end -
 				ctx->overps[i]->start;
-			if (ctx->overps[i]->end > max.end) {
-				max.end = ctx->overps[i]->end;
+			if (ctx->overps[i]->end > *last_end) {
+				*last_end = ctx->overps[i]->end;
 			} else {
 				ctx->overps[i]->mend = 0;
 				ctx->overps[i]->mstart = 0;
@@ -1195,7 +1202,7 @@ static int context_build_overlap(struct smq_invoke_ctx *ctx)
 			ctx->overps[i]->mend = ctx->overps[i]->end;
 			ctx->overps[i]->mstart = ctx->overps[i]->start;
 			ctx->overps[i]->offset = 0;
-			max = *ctx->overps[i];
+			*last_end = ctx->overps[i]->end;
 		}
 	}
 bail:
