@@ -3191,6 +3191,11 @@ int build_detached_freelist(struct kmem_cache *s, size_t size,
 		df->s = page->slab_cache;
 	} else {
 		df->s = cache_from_obj(s, object); /* Support for memcg */
+		/* Not a slab object: virt_to_cache() warned, skip it */
+		if (unlikely(!df->s)) {
+			p[size] = NULL; /* mark object processed */
+			return size;
+		}
 	}
 
 	if (is_kfence_address(object)) {
