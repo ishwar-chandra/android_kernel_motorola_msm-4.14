@@ -3220,6 +3220,14 @@ static int a6xx_perfcounter_update(struct adreno_device *adreno_dev,
 	for (i = 0; i < lock->list_length >> 1; i++)
 		if (reg_pair[i].offset == reg->select)
 			break;
+
+	/* Ensure there is room in the reglist buffer for a new pair */
+	if ((i == lock->list_length >> 1) &&
+		(sizeof(*lock) + (i + 1) * sizeof(*reg_pair) >
+		 adreno_dev->pwrup_reglist.size)) {
+		ret = -ENOSPC;
+		goto unlock;
+	}
 	/*
 	 * If the perfcounter selct register is not present overwrite last entry
 	 * with new entry and add RBBM perf counter enable at the end.

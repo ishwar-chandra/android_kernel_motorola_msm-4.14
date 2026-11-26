@@ -1163,7 +1163,7 @@ static int context_build_overlap(struct smq_invoke_ctx *ctx)
 	int inbufs = REMOTE_SCALARS_INBUFS(ctx->sc);
 	int outbufs = REMOTE_SCALARS_OUTBUFS(ctx->sc);
 	int nbufs = inbufs + outbufs;
-	struct overlap max;
+	uintptr_t ion_buf_end = 0, non_ion_buf_end = 0;
 
 	for (i = 0; i < nbufs; ++i) {
 		ctx->overs[i].start = (uintptr_t)lpra[i].buf.pv;
@@ -1177,16 +1177,23 @@ static int context_build_overlap(struct smq_invoke_ctx *ctx)
 		ctx->overps[i] = &ctx->overs[i];
 	}
 	sort(ctx->overps, nbufs, sizeof(*ctx->overps), overlap_ptr_cmp, NULL);
-	max.start = 0;
-	max.end = 0;
 	for (i = 0; i < nbufs; ++i) {
-		if (ctx->overps[i]->start < max.end) {
-			ctx->overps[i]->mstart = max.end;
+		/*
+		 * ION buffers (those get_args() maps from an fd) are not
+		 * copied, so they must not shift the copy offsets of non-ION
+		 * buffers they overlap. Track the end of each type apart.
+		 */
+		int raix = ctx->overps[i]->raix;
+		uintptr_t *last_end = (ctx->fds && ctx->fds[raix] != -1) ?
+				&ion_buf_end : &non_ion_buf_end;
+
+		if (ctx->overps[i]->start < *last_end) {
+			ctx->overps[i]->mstart = *last_end;
 			ctx->overps[i]->mend = ctx->overps[i]->end;
-			ctx->overps[i]->offset = max.end -
+			ctx->overps[i]->offset = *last_end -
 				ctx->overps[i]->start;
-			if (ctx->overps[i]->end > max.end) {
-				max.end = ctx->overps[i]->end;
+			if (ctx->overps[i]->end > *last_end) {
+				*last_end = ctx->overps[i]->end;
 			} else {
 				ctx->overps[i]->mend = 0;
 				ctx->overps[i]->mstart = 0;
@@ -1195,7 +1202,7 @@ static int context_build_overlap(struct smq_invoke_ctx *ctx)
 			ctx->overps[i]->mend = ctx->overps[i]->end;
 			ctx->overps[i]->mstart = ctx->overps[i]->start;
 			ctx->overps[i]->offset = 0;
-			max = *ctx->overps[i];
+			*last_end = ctx->overps[i]->end;
 		}
 	}
 bail:
@@ -1623,6 +1630,7 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 		if (map) {
 			struct vm_area_struct *vma;
 			uintptr_t offset;
+			size_t map_len;
 			uint64_t num = buf_num_pages(buf, len);
 			int idx = list[i].pgidx;
 
@@ -1644,6 +1652,29 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 			}
 			pages[idx].addr = map->phys + offset;
 			pages[idx].size = num << PAGE_SHIFT;
+			/*
+			 * map->size is the page-rounded user length when the
+			 * session has no SMMU context bank (cb 0); the dma-buf
+			 * itself is the real limit there, so use the larger.
+			 */
+			map_len = map->size;
+			if (map->buf && map->buf->size > map_len)
+				map_len = map->buf->size;
+			/*
+			 * Check for page range overflow and validate page
+			 * range is not greater than map buffer range.
+			 * This prevents potential buffer overflow
+			 * and memory corruption that could be exploited.
+			 */
+			if (pages[idx].addr > (ULLONG_MAX - pages[idx].size) ||
+			    (pages[idx].addr + pages[idx].size) >
+					(map->phys + map_len)) {
+				err = -EFAULT;
+				pr_err("adsprpc: %s: invalid buffer addr 0x%llx len 0x%zx IPA 0x%llx size 0x%zx fd %d\n",
+					__func__, buf, len, map->phys,
+					map_len, map->fd);
+				goto bail;
+			}
 		}
 		rpra[i].buf.pv = lrpra[i].buf.pv = buf;
 	}
