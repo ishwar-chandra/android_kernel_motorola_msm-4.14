@@ -2060,9 +2060,18 @@ struct qcom_glink *qcom_glink_native_probe(struct device *dev,
 
 	glink->irq = irq;
 
-	ret = enable_irq_wake(irq);
-	if (ret < 0)
-		dev_err(dev, "enable_irq_wake() failed on %d\n", irq);
+	/*
+	 * IRQF_NO_SUSPEND keeps the glink IRQ enabled through noirq suspend so
+	 * RPM waits cannot deadlock.  Do not also arm it as a wakeup source on
+	 * this SoC: CAF reverted that for Trinket (SM6125) because it breaks
+	 * low-power mode, and the IRQ core logs "misconfigured IRQ" and aborts
+	 * suspend.  GVM keeps the original wakeup behavior.
+	 */
+	if (vm_support) {
+		ret = enable_irq_wake(irq);
+		if (ret < 0)
+			dev_err(dev, "enable_irq_wake() failed on %d\n", irq);
+	}
 
 	size = of_property_count_u32_elems(dev->of_node, "cpu-affinity");
 	if (size > 0) {
